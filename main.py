@@ -1,12 +1,13 @@
 import argparse
 import os
+import random
 import time
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-
+import torch.nn.functional as F
 from models import *
 from data_loader import data_loader
 from helper import AverageMeter, save_checkpoint, accuracy, adjust_learning_rate
@@ -50,7 +51,6 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
 
 best_prec1 = 0.0
-
 
 def main():
     global args, best_prec1
@@ -169,6 +169,60 @@ def main():
         }, is_best, args.arch + '.pth')
 
 
+def mixup_data(x, y, alpha=1.0, use_cuda=True):
+    '''Returns mixed inputs, pairs of targets, and lambda'''
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+
+    batch_size = x.size()[0]
+    if use_cuda:
+        index = torch.randperm(batch_size).cuda()
+    else:
+        index = torch.randperm(batch_size)
+
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+def mixup_criterion(pred, y_a, y_b, lam):
+    return lam * F.cross_entropy(pred, y_a) + (1 - lam) * F.cross_entropy(pred, y_b)
+
+def cutou_criterion(x, pred, y):
+    T = 20
+    loss = 0
+    bs = pred.shape[0]
+    one_hot = F.one_hot(y, num_classes=1000)
+    for idx in range(bs):
+        min_val = torch.min(x)
+        ratio = 1 - torch.sum(x == min_val)/(3*224**2)  # non zero ratio
+        loss += F.kl_div(F.log_softmax(pred[idx]/T, 1), F.softmax(ratio*one_hot[idx] / T, 1)).mul(T**2)
+    return loss/bs
+
+def calculation_functions(model, x, y, ratio=0.5):
+    bs, _, _, _ = x.shape
+    if random.uniform(0, 1) < ratio:
+        # mode: sensitive
+        # use cutout
+        mode = torch.zeros((bs, 1), device=x.device).long()
+        output = model(x, mode)
+        loss = F.cross_entropy(output, y)
+    else:
+        # robustness
+        mode = torch.ones((bs, 1), device=x.device).long()
+        if random.uniform(0, 1) < .5:
+            # use mixup
+            mixed_x, y_a, y_b, lam = mixup_data(x, y)
+            output = model(mixed_x, mode)
+            loss = mixup_criterion(output, y_a, y_b, lam)
+        else:
+            # use cutout
+            output = model(x, mode)
+            loss = cutou_criterion(x, output, y)
+
+    return loss, output
+
 def train(train_loader, model, criterion, optimizer, epoch, print_freq):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -188,8 +242,7 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
         input = input.cuda(async=True)
 
         # compute output
-        output = model(input)
-        loss = criterion(output, target)
+        loss, output = calculation_functions(model, input, target, ratio=.5)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
