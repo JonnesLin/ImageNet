@@ -16,7 +16,8 @@ model_names = [
     'densenet169', 'densenet201', 'densenet201', 'densenet161',
     'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn',
     'vgg19', 'vgg19_bn', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-    'resnet152'
+    'resnet152', 'switchnet18', 'switchnet34', 'switchnet50', 'switchnet101',
+    'switchnet152'
 ]
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
@@ -101,6 +102,16 @@ def main():
         model = resnet101(pretrained=args.pretrained)
     elif args.arch == 'resnet152':
         model = resnet152(pretrained=args.pretrained)
+    elif args.arch == 'switchnet18':
+        model = switchnet18(pretrained=args.pretrained)
+    elif args.arch == 'switchnet34':
+        model = switchnet34(pretrained=args.pretrained)
+    elif args.arch == 'switchnet50':
+        model = switchnet50(pretrained=args.pretrained)
+    elif args.arch == 'switchnet101':
+        model = switchnet101(pretrained=args.pretrained)
+    elif args.arch == 'switchnet152':
+        model = switchnet152(pretrained=args.pretrained)
     else:
         raise NotImplementedError
 
