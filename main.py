@@ -52,6 +52,7 @@ parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
 
 best_prec1 = 0.0
 
+
 def main():
     global args, best_prec1
     args = parser.parse_args()
@@ -191,6 +192,7 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
     y_a, y_b = y, y[index]
     return mixed_x, y_a, y_b, lam
 
+
 def mixup_criterion(pred, y_a, y_b, lam):
     loss = lam * F.cross_entropy(pred, y_a) + (1 - lam) * F.cross_entropy(pred, y_b)
     '''
@@ -204,6 +206,7 @@ def mixup_criterion(pred, y_a, y_b, lam):
     '''
     return loss
 
+
 def cutou_criterion(x, pred, y):
     T = 20
     loss = 0
@@ -211,20 +214,25 @@ def cutou_criterion(x, pred, y):
     one_hot = F.one_hot(y, num_classes=1000)
     for idx in range(bs):
         min_val = torch.min(x[idx])
-        ratio = 1 - torch.sum(x[idx] == min_val)/(3*224**2)  # non zero ratio
-        loss += F.kl_div(F.log_softmax(pred[idx:idx+1]/T, 1), F.softmax(ratio*one_hot[idx:idx+1] / T, 1)).mul(T**2)
-    return loss/bs
+        ratio = 1 - torch.sum(x[idx] == min_val) / (3 * 224 ** 2)  # non zero ratio
+        loss += F.kl_div(F.log_softmax(pred[idx:idx + 1] / T, 1), F.softmax(ratio * one_hot[idx:idx + 1] / T, 1)).mul(
+            T ** 2)
+    return loss / bs
+
 
 def calculation_functions(model, x, y, ratio=0.5):
     bs, _, _, _ = x.shape
+    str_mode = ''
     if random.uniform(0, 1) < ratio:
         # mode: sensitive
         # use cutout
+        str_mode = 'sensitive'
         mode = torch.zeros((bs), device=x.device).long()
         output = model(x, mode)
         loss = F.cross_entropy(output, y)
     else:
         # robustness
+        str_mode = 'robustness'
         mode = torch.ones((bs), device=x.device).long()
         # if random.uniform(0, 1) < .5:
         # use mixup
@@ -238,7 +246,7 @@ def calculation_functions(model, x, y, ratio=0.5):
             loss = cutou_criterion(x, output, y)
         '''
 
-    return loss, output
+    return loss, output, str_mode
 
 
 def train(train_loader, model, criterion, optimizer, epoch, print_freq):
@@ -260,7 +268,7 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
         input = input.cuda()
 
         # compute output
-        loss, output = calculation_functions(model, input, target, ratio=.5)
+        loss, output, str_mode = calculation_functions(model, input, target, ratio=.5)
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
@@ -278,13 +286,13 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
         end = time.time()
 
         if i % print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
+            print('Mode:{0}  Epoch: [{1}][{2}/{3}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
                   'Prec@5 {top5.val:.3f} ({top5.avg:.3f})\t'.format(
-                epoch, i, len(train_loader), batch_time=batch_time,
+                str_mode, epoch, i, len(train_loader), batch_time=batch_time,
                 data_time=data_time, loss=losses, top1=top1, top5=top5))
 
 
