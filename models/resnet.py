@@ -165,6 +165,7 @@ def resnet18(pretrained=False, **kwargs):
     """
     model = ResNet(BasicBlock, [2, 2, 2, 2], **kwargs)
     if pretrained:
+        os.makedirs(models_dir, exist_ok=True)
         model.load_state_dict(torch.load(os.path.join(models_dir, model_name['resnet18'])))
     return model
 
@@ -177,6 +178,7 @@ def resnet34(pretrained=False, **kwargs):
     """
     model = ResNet(BasicBlock, [3, 4, 6, 3], **kwargs)
     if pretrained:
+        os.makedirs(models_dir, exist_ok=True)
         model.load_state_dict(torch.load(os.path.join(models_dir, model_name['resnet34'])))
     return model
 
@@ -189,6 +191,7 @@ def resnet50(pretrained=False, **kwargs):
     """
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
+        os.makedirs(models_dir, exist_ok=True)
         model.load_state_dict(torch.load(os.path.join(models_dir, model_name['resnet50'])))
     return model
 
@@ -201,6 +204,7 @@ def resnet101(pretrained=False, **kwargs):
     """
     model = ResNet(Bottleneck, [3, 4, 23, 3], **kwargs)
     if pretrained:
+        os.makedirs(models_dir, exist_ok=True)
         model.load_state_dict(torch.load(os.path.join(models_dir, model_name['resnet101'])))
     return model
 
@@ -213,5 +217,6 @@ def resnet152(pretrained=False, **kwargs):
     """
     model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
     if pretrained:
+        os.makedirs(models_dir, exist_ok=True)
         model.load_state_dict(torch.load(os.path.join(models_dir, model_name['resnet152'])))
     return model

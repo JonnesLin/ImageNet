@@ -29,7 +29,7 @@ parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='numer of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful to restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int, metavar='N',
+parser.add_argument('-b', '--batch-size', default=64, type=int, metavar='N',
                     help='mini-batch size (default: 256)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float, metavar='LR',
                     help='initial learning rate')
@@ -121,10 +121,14 @@ def main():
 
     # define loss and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
+    optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
+                          lr=args.lr, momentum=args.momentum,
+                          weight_decay=args.weight_decay)
+    '''
     optimizer = optim.SGD(model.parameters(), lr=args.lr,
                           momentum=args.momentum,
                           weight_decay=args.weight_decay)
-
+    '''
     # optionlly resume from a checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -154,7 +158,8 @@ def main():
         train(train_loader, model, criterion, optimizer, epoch, args.print_freq)
 
         # evaluate on validation set
-        prec1, prec5 = validate(val_loader, model, criterion, args.print_freq)
+        prec1, prec5 = validate(val_loader, model, criterion, args.print_freq, mode='robustness')
+        prec1, prec5 = validate(val_loader, model, criterion, args.print_freq, mode='sensitive')
 
         # remember the best prec@1 and save checkpoint
         is_best = prec1 > best_prec1
@@ -187,7 +192,17 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
     return mixed_x, y_a, y_b, lam
 
 def mixup_criterion(pred, y_a, y_b, lam):
-    return lam * F.cross_entropy(pred, y_a) + (1 - lam) * F.cross_entropy(pred, y_b)
+    loss = lam * F.cross_entropy(pred, y_a) + (1 - lam) * F.cross_entropy(pred, y_b)
+    '''
+    T = 100
+    one_hot_y_a = F.one_hot(y_a, num_classes=1000)
+    one_hot_y_b = F.one_hot(y_b, num_classes=1000)
+    new_target = lam*one_hot_y_a + (1-lam)*one_hot_y_b
+    loss = F.kl_div(F.log_softmax(pred/T, 1), F.softmax(new_target / T, 1), reduction='batchmean')
+    # loss = F.kl_div(F.log_softmax(pred/T, 1), new_target / T, reduction='batchmean')
+    loss = loss.mul(T**2)
+    '''
+    return loss
 
 def cutou_criterion(x, pred, y):
     T = 20
@@ -195,9 +210,9 @@ def cutou_criterion(x, pred, y):
     bs = pred.shape[0]
     one_hot = F.one_hot(y, num_classes=1000)
     for idx in range(bs):
-        min_val = torch.min(x)
-        ratio = 1 - torch.sum(x == min_val)/(3*224**2)  # non zero ratio
-        loss += F.kl_div(F.log_softmax(pred[idx]/T, 1), F.softmax(ratio*one_hot[idx] / T, 1)).mul(T**2)
+        min_val = torch.min(x[idx])
+        ratio = 1 - torch.sum(x[idx] == min_val)/(3*224**2)  # non zero ratio
+        loss += F.kl_div(F.log_softmax(pred[idx:idx+1]/T, 1), F.softmax(ratio*one_hot[idx:idx+1] / T, 1)).mul(T**2)
     return loss/bs
 
 def calculation_functions(model, x, y, ratio=0.5):
@@ -205,23 +220,26 @@ def calculation_functions(model, x, y, ratio=0.5):
     if random.uniform(0, 1) < ratio:
         # mode: sensitive
         # use cutout
-        mode = torch.zeros((bs, 1), device=x.device).long()
+        mode = torch.zeros((bs), device=x.device).long()
         output = model(x, mode)
         loss = F.cross_entropy(output, y)
     else:
         # robustness
-        mode = torch.ones((bs, 1), device=x.device).long()
-        if random.uniform(0, 1) < .5:
-            # use mixup
-            mixed_x, y_a, y_b, lam = mixup_data(x, y)
-            output = model(mixed_x, mode)
-            loss = mixup_criterion(output, y_a, y_b, lam)
+        mode = torch.ones((bs), device=x.device).long()
+        # if random.uniform(0, 1) < .5:
+        # use mixup
+        mixed_x, y_a, y_b, lam = mixup_data(x, y)
+        output = model(mixed_x, mode)
+        loss = mixup_criterion(output, y_a, y_b, lam)
+        '''
         else:
             # use cutout
             output = model(x, mode)
             loss = cutou_criterion(x, output, y)
+        '''
 
     return loss, output
+
 
 def train(train_loader, model, criterion, optimizer, epoch, print_freq):
     batch_time = AverageMeter()
@@ -238,8 +256,8 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        target = target.cuda(async=True)
-        input = input.cuda(async=True)
+        target = target.cuda()
+        input = input.cuda()
 
         # compute output
         loss, output = calculation_functions(model, input, target, ratio=.5)
@@ -248,7 +266,7 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
-        top5.update(prec1[0], input.size(0))
+        top5.update(prec5[0], input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -270,45 +288,87 @@ def train(train_loader, model, criterion, optimizer, epoch, print_freq):
                 data_time=data_time, loss=losses, top1=top1, top5=top5))
 
 
-def validate(val_loader, model, criterion, print_freq):
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
+def validate(val_loader, model, criterion, print_freq, mode='sensitive'):
+    if mode == 'sensitive':
+        batch_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
 
-    # switch to evaluate mode
-    model.eval()
+        # switch to evaluate mode
+        model.eval()
 
-    end = time.time()
-    for i, (input, target) in enumerate(val_loader):
-        target = target.cuda(async=True)
-        input = input.cuda(async=True)
-        with torch.no_grad():
-            # compute output
-            output = model(input)
-            loss = criterion(output, target)
+        end = time.time()
+        for i, (input, target) in enumerate(val_loader):
+            target = target.cuda()
+            input = input.cuda()
+            with torch.no_grad():
+                # compute output
+                bs = input.shape[0]
+                mode_code = torch.zeros((bs), device=input.device).long()
+                output = model(input, mode_code)
+                loss = criterion(output, target)
 
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-            losses.update(loss.item(), input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+                losses.update(loss.item(), input.size(0))
+                top1.update(prec1[0], input.size(0))
+                top5.update(prec5[0], input.size(0))
 
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
 
-            if i % print_freq == 0:
-                print('Test: [{0}/{1}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss=losses,
-                    top1=top1, top5=top5))
+                if i % print_freq == 0:
+                    print('Sensitive Mode: Test: [{0}/{1}]\t'
+                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                        i, len(val_loader), batch_time=batch_time, loss=losses,
+                        top1=top1, top5=top5))
 
-    print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+        print('Sensitive Mode: * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+    else:
+        batch_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
 
+        # switch to evaluate mode
+        model.eval()
+
+        end = time.time()
+        for i, (input, target) in enumerate(val_loader):
+            target = target.cuda()
+            input = input.cuda()
+            with torch.no_grad():
+                # compute output
+                bs = input.shape[0]
+                mode_code = torch.ones((bs), device=input.device).long()
+                output = model(input, mode_code)
+                loss = criterion(output, target)
+
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
+                losses.update(loss.item(), input.size(0))
+                top1.update(prec1[0], input.size(0))
+                top5.update(prec5[0], input.size(0))
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                if i % print_freq == 0:
+                    print('Robustness Mode:Test: [{0}/{1}]\t'
+                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
+                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
+                        i, len(val_loader), batch_time=batch_time, loss=losses,
+                        top1=top1, top5=top5))
+
+        print('Robustness Mode:Test: * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
     return top1.avg, top5.avg
 
 

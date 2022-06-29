@@ -3,7 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torchvision.models
-from resnet import resnet18, resnet34, resnet50, resnet101, resnet152
+from .resnet import resnet18, resnet34, resnet50, resnet101, resnet152
 __all__ = ['SwitchNet', 'switchnet18', 'switchnet34', 'switchnet50', 'switchnet101', 'switchnet152']
 
 
@@ -22,26 +22,33 @@ class SwitchNet(nn.Module):
         elif backbone == 'resnet152':
             self.resnet = resnet152(pretrained=True, num_classes=num_classes)
 
+        # Fixed some layers
+        self.resnet.layer1.requires_grad = False
+        self.resnet.layer2.requires_grad = False
+        self.resnet.layer3.requires_grad = False
+        self.resnet.layer4.requires_grad = False
+
         self.pre_proc = nn.Sequential(
             self.resnet.conv1,
             self.resnet.bn1,
-            self.relu,
-            self.maxpool
+            self.resnet.relu,
+            self.resnet.maxpool
         )
         self.backbone = nn.Sequential(
             self.resnet.layer1,
             self.resnet.layer2,
             self.resnet.layer3,
-            self.resnet.layer4,
+            self.resnet.layer4
+        )
+        self.head = nn.Sequential(
             self.resnet.avgpool,
             nn.Flatten(),
             self.resnet.fc
         )
         # There are two modes: one is Sensitive and one is Robustness
         self.swith_layer = nn.Sequential(
-            nn.Embedding(2, 576),
-            nn.Unflatten(1, (1, 24, 24)),
-
+            nn.Embedding(2, 784),
+            nn.Unflatten(1, (1, 28, 28)),
             nn.Upsample(scale_factor=2),
             nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(64),
@@ -59,8 +66,9 @@ class SwitchNet(nn.Module):
     def forward(self, x, mode):
         x = self.pre_proc(x)
         mode = self.swith_layer(mode)
-
-        x = self.backbone(x + mode)
+        with torch.no_grad():
+            x = self.backbone(x + mode)
+        x = self.head(x)
         return x
 
 

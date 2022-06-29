@@ -58,7 +58,7 @@ def data_loader(root, batch_size=256, workers=1, pin_memory=True):
             transforms.RandomResizedCrop(224),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            Cutout(n_holes=1, length=64),
+            Cutout(n_holes=1, length=32),
             normalize
         ])
     )
