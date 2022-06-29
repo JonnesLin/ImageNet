@@ -32,10 +32,10 @@ class SwitchNet(nn.Module):
             self.resnet.conv1,
             self.resnet.bn1,
             self.resnet.relu,
-            self.resnet.maxpool
+            self.resnet.maxpool,
+            self.resnet.layer1
         )
         self.backbone = nn.Sequential(
-            self.resnet.layer1,
             self.resnet.layer2,
             self.resnet.layer3,
             self.resnet.layer4
@@ -49,10 +49,24 @@ class SwitchNet(nn.Module):
         self.swith_layer = nn.Sequential(
             nn.Embedding(2, 784),
             nn.Unflatten(1, (1, 28, 28)),
+            nn.Conv2d(1, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
             nn.Upsample(scale_factor=2),
-            nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1),
+            # 56
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2),
+            # 112
+            nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=2),
+            # 224
+            nn.Conv2d(32, 3, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(3)
+
         )
 
         for m in self.swith_layer:
@@ -64,10 +78,10 @@ class SwitchNet(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, mode):
-        x = self.pre_proc(x)
         mode = self.swith_layer(mode)
+        x = self.pre_proc(x+mode)
         with torch.no_grad():
-            x = self.backbone(x + mode)
+            x = self.backbone(x)
         x = self.head(x)
         return x
 
