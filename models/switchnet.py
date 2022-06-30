@@ -32,8 +32,7 @@ class SwitchNet(nn.Module):
             self.resnet.conv1,
             self.resnet.bn1,
             self.resnet.relu,
-            self.resnet.maxpool,
-            self.resnet.layer1
+            self.resnet.maxpool
         )
         self.backbone = nn.Sequential(
             self.resnet.layer2,
@@ -70,8 +69,9 @@ class SwitchNet(nn.Module):
     def forward(self, x, mode):
         mode = self.switch_layer(mode)
         x = self.pre_proc(x)
+        x = self.resnet.layer1(x+mode)
         with torch.no_grad():
-            x = self.backbone(x+mode)
+            x = self.backbone(x)
         x = self.head(x)
         return x
 
