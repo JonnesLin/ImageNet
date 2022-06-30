@@ -118,14 +118,12 @@ def main():
 
     # use cuda
 
-
     # model = torch.nn.parallel.DistributedDataParallel(model)
 
     # define loss and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
-    optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
-                          lr=args.lr, momentum=args.momentum,
-                          weight_decay=args.weight_decay)
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()),
+                            lr=args.lr, weight_decay=args.weight_decay)
 
     model = nn.DataParallel(model)
     model.cuda()
