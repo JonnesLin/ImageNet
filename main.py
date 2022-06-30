@@ -117,8 +117,8 @@ def main():
         raise NotImplementedError
 
     # use cuda
-    model = nn.DataParallel(model)
-    model.cuda()
+
+
     # model = torch.nn.parallel.DistributedDataParallel(model)
 
     # define loss and optimizer
@@ -126,6 +126,9 @@ def main():
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
                           lr=args.lr, momentum=args.momentum,
                           weight_decay=args.weight_decay)
+
+    model = nn.DataParallel(model)
+    model.cuda()
     '''
     optimizer = optim.SGD(model.parameters(), lr=args.lr,
                           momentum=args.momentum,
