@@ -23,7 +23,7 @@ class SwitchNet(nn.Module):
             self.resnet = resnet152(pretrained=True, num_classes=num_classes)
 
         # Fixed some layers
-        self.resnet.layer1.requires_grad = False
+        self.resnet.layer1.requires_grad = True
         self.resnet.layer2.requires_grad = False
         self.resnet.layer3.requires_grad = False
         self.resnet.layer4.requires_grad = False
@@ -32,10 +32,10 @@ class SwitchNet(nn.Module):
             self.resnet.conv1,
             self.resnet.bn1,
             self.resnet.relu,
-            self.resnet.maxpool
+            self.resnet.maxpool,
+            self.resnet.layer1
         )
         self.backbone = nn.Sequential(
-            self.resnet.layer1,
             self.resnet.layer2,
             self.resnet.layer3,
             self.resnet.layer4
@@ -46,7 +46,7 @@ class SwitchNet(nn.Module):
             self.resnet.fc
         )
         # There are two modes: one is Sensitive and one is Robustness
-        self.swith_layer = nn.Sequential(
+        self.switch_layer = nn.Sequential(
             nn.Embedding(2, 784),
             nn.Unflatten(1, (1, 28, 28)),
             nn.Conv2d(1, 128, kernel_size=3, stride=1, padding=1),
@@ -55,10 +55,11 @@ class SwitchNet(nn.Module):
             nn.Upsample(scale_factor=2),
             # 56
             nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(64)
+            nn.BatchNorm2d(64),
+            nn.ReLU()
         )
 
-        for m in self.swith_layer:
+        for m in self.switch_layer:
             if isinstance(m, nn.Conv2d):
                 n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
                 m.weight.data.normal_(0, math.sqrt(2. / n))
@@ -67,7 +68,7 @@ class SwitchNet(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, mode):
-        mode = self.swith_layer(mode)
+        mode = self.switch_layer(mode)
         x = self.pre_proc(x)
         with torch.no_grad():
             x = self.backbone(x+mode)
