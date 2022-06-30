@@ -117,6 +117,7 @@ def main():
         raise NotImplementedError
 
     # use cuda
+    model = nn.DataParallel(model)
     model.cuda()
     # model = torch.nn.parallel.DistributedDataParallel(model)
 
