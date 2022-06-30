@@ -68,9 +68,9 @@ class SwitchNet(nn.Module):
 
     def forward(self, x, mode):
         mode = self.swith_layer(mode)
-        x = self.pre_proc(x+mode)
+        x = self.pre_proc(x)
         with torch.no_grad():
-            x = self.backbone(x)
+            x = self.backbone(x+mode)
         x = self.head(x)
         return x
 
